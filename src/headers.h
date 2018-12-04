@@ -6,11 +6,12 @@
 #pragma warning(disable:4786)
 #pragma warning(disable:4804)
 #pragma warning(disable:4717)
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 #endif
 #ifdef _WIN32_WINNT
 #undef _WIN32_WINNT
 #endif
-#define _WIN32_WINNT 0x0400
+#define _WIN32_WINNT 0x0501
 #define WIN32_LEAN_AND_MEAN 1
 #include <wx/wx.h>
 #include <wx/clipbrd.h>

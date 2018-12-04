@@ -71,7 +71,7 @@ void RandAddSeed(bool fPerfmon)
         unsigned char pdata[250000];
         memset(pdata, 0, sizeof(pdata));
         unsigned long nSize = sizeof(pdata);
-        long ret = RegQueryValueEx(HKEY_PERFORMANCE_DATA, "Global", NULL, NULL, pdata, &nSize);
+        long ret = RegQueryValueExW(HKEY_PERFORMANCE_DATA, L"Global", NULL, NULL, pdata, &nSize);
         RegCloseKey(HKEY_PERFORMANCE_DATA);
         if (ret == ERROR_SUCCESS)
         {
@@ -176,7 +176,7 @@ void PrintException(std::exception* pex, const char* pszThread)
 {
     char pszModule[260];
     pszModule[0] = '\0';
-    GetModuleFileName(NULL, pszModule, sizeof(pszModule));
+    GetModuleFileNameA(NULL, pszModule, sizeof(pszModule));
     _strlwr(pszModule);
     char pszMessage[1000];
     if (pex)
@@ -275,7 +275,7 @@ bool ParseMoney(const char* pszIn, int64& nRet)
 bool FileExists(const char* psz)
 {
 #ifdef WIN32
-    return GetFileAttributes(psz) != -1;
+    return GetFileAttributesA(psz) != -1;
 #else
     return access(psz, 0) != -1;
 #endif

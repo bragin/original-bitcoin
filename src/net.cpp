@@ -23,7 +23,7 @@ CAddress addrLocalHost(0, DEFAULT_PORT, nLocalServices);
 CNode nodeLocalHost(INVALID_SOCKET, CAddress("127.0.0.1", nLocalServices));
 CNode* pnodeLocalHost = &nodeLocalHost;
 bool fShutdown = false;
-array<bool, 10> vfThreadRunning;
+std::array<bool, 10> vfThreadRunning;
 vector<CNode*> vNodes;
 CCriticalSection cs_vNodes;
 map<vector<unsigned char>, CAddress> mapAddresses;
@@ -137,8 +137,8 @@ bool GetMyExternalIP2(const CAddress& addrConnect, const char* pszGet, const cha
 bool GetMyExternalIP(unsigned int& ipRet)
 {
     CAddress addrConnect;
-    char* pszGet;
-    char* pszKeyword;
+    char* pszGet = NULL;
+    char* pszKeyword = NULL;
 
     for (int nLookup = 0; nLookup <= 1; nLookup++)
     for (int nHost = 1; nHost <= 2; nHost++)
@@ -782,7 +782,7 @@ void ThreadOpenConnections2(void* parg)
 
             // Choose a random IP in the class C
             map<unsigned int, vector<CAddress> >::iterator mi = mapIP.begin();
-            advance(mi, GetRand(mapIP.size()));
+            std::advance(mi, GetRand(mapIP.size()));
 
             // Once we've chosen an IP, we'll try every given port before moving on
             foreach(const CAddress& addrConnect, (*mi).second)
@@ -970,7 +970,7 @@ bool StartNode(string& strError)
     // IP address, and port for the socket that is being bound
     int nRetryLimit = 15;
     struct sockaddr_in sockaddr = addrLocalHost.GetSockAddr();
-    if (bind(hListenSocket, (struct sockaddr*)&sockaddr, sizeof(sockaddr)) == SOCKET_ERROR)
+    if (::bind(hListenSocket, (struct sockaddr*)&sockaddr, sizeof(sockaddr)) == SOCKET_ERROR)
     {
         int nErr = WSAGetLastError();
         if (nErr == WSAEADDRINUSE)

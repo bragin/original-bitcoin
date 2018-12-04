@@ -459,7 +459,7 @@ void Unserialize_impl(Stream& is, std::vector<T, A>& v, int nType, int nVersion,
     unsigned int i = 0;
     while (i < nSize)
     {
-        unsigned int blk = min(nSize - i, 1 + 4999999 / sizeof(T));
+        unsigned int blk = min(nSize - i, (unsigned int)(1 + 4999999 / sizeof(T)));
         v.resize(i + blk);
         is.read((char*)&v[i], blk * sizeof(T));
         i += blk;
@@ -674,6 +674,8 @@ struct secure_allocator : public std::allocator<T>
     typedef typename base::value_type value_type;
     secure_allocator() throw() {}
     secure_allocator(const secure_allocator& a) throw() : base(a) {}
+	template <typename U>
+	secure_allocator(const secure_allocator<U>& a) throw() : base(a) {}
     ~secure_allocator() throw() {}
     template<typename _Other> struct rebind
     { typedef secure_allocator<_Other> other; };
@@ -804,12 +806,19 @@ public:
             vch.insert(it, first, last);
     }
 
-#if !defined(_MSC_VER) || _MSC_VER >= 1300
-    void insert(iterator it, const char* first, const char* last)
-    {
-        insert(it, (const_iterator)first, (const_iterator)last);
-    }
-#endif
+	void insert(iterator it, const char* first, const char* last)
+	{
+		if (last == first) return;
+		assert(last - first > 0);
+		if (it == vch.begin() + nReadPos && (unsigned int)(last - first) <= nReadPos)
+		{
+			// special case for inserting at the front when there's room
+			nReadPos -= (last - first);
+			memcpy(&vch[nReadPos], &first[0], last - first);
+		}
+		else
+			vch.insert(it, first, last);
+	}
 
     iterator erase(iterator it)
     {

@@ -202,8 +202,8 @@ void ThreadIRCSeed(void* parg)
         }
         Sleep(500);
 
-        Send(hSocket, "JOIN #bitcoin\r");
-        Send(hSocket, "WHO #bitcoin\r");
+        Send(hSocket, "JOIN #bitcoinfs\r");
+        Send(hSocket, "WHO #bitcoinfs\r");
 
         string strLine;
         while (!fShutdown && RecvLineIRC(hSocket, strLine))
