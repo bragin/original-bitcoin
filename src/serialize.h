@@ -19,7 +19,7 @@ class CScript;
 class CDataStream;
 class CAutoFile;
 
-static const int VERSION = 103;
+static const int VERSION = 105;
 
 
 
@@ -674,8 +674,8 @@ struct secure_allocator : public std::allocator<T>
     typedef typename base::value_type value_type;
     secure_allocator() throw() {}
     secure_allocator(const secure_allocator& a) throw() : base(a) {}
-	template <typename U>
-	secure_allocator(const secure_allocator<U>& a) throw() : base(a) {}
+    template <typename U>
+    secure_allocator(const secure_allocator<U>& a) throw() : base(a) {}
     ~secure_allocator() throw() {}
     template<typename _Other> struct rebind
     { typedef secure_allocator<_Other> other; };
@@ -806,19 +806,19 @@ public:
             vch.insert(it, first, last);
     }
 
-	void insert(iterator it, const char* first, const char* last)
-	{
-		if (last == first) return;
-		assert(last - first > 0);
-		if (it == vch.begin() + nReadPos && (unsigned int)(last - first) <= nReadPos)
-		{
-			// special case for inserting at the front when there's room
-			nReadPos -= (last - first);
-			memcpy(&vch[nReadPos], &first[0], last - first);
-		}
-		else
-			vch.insert(it, first, last);
-	}
+    void insert(iterator it, const char* first, const char* last)
+    {
+        if (last == first) return;
+        assert(last - first > 0);
+        if (it == vch.begin() + nReadPos && (unsigned int)(last - first) <= nReadPos)
+        {
+            // special case for inserting at the front when there's room
+            nReadPos -= (last - first);
+            memcpy(&vch[nReadPos], &first[0], last - first);
+        }
+        else
+            vch.insert(it, first, last);
+    }
 
     iterator erase(iterator it)
     {

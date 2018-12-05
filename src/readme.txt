@@ -1,4 +1,4 @@
-BitCoin v0.1.3 ALPHA
+BitCoin v0.1.5 ALPHA
 
 Copyright (c) 2009 Satoshi Nakamoto
 Distributed under the MIT/X11 software license, see the accompanying
