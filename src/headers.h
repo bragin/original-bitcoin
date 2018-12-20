@@ -5,6 +5,7 @@
 #ifdef _MSC_VER
 #pragma warning(disable:4786)
 #pragma warning(disable:4804)
+#pragma warning(disable:4805)
 #pragma warning(disable:4717)
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #endif
@@ -16,6 +17,7 @@
 #include <wx/wx.h>
 #include <wx/clipbrd.h>
 #include <wx/snglinst.h>
+#include <wx/taskbar.h>
 #include <openssl/ecdsa.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -24,6 +26,8 @@
 #include <windows.h>
 #include <winsock2.h>
 #include <mswsock.h>
+#include <shlobj.h>
+#include <shlwapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <io.h>
@@ -56,6 +60,7 @@ using namespace boost;
 
 
 
+#include "strlcpy.h"
 #include "serialize.h"
 #include "uint256.h"
 #include "util.h"

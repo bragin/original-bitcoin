@@ -19,7 +19,7 @@ class CScript;
 class CDataStream;
 class CAutoFile;
 
-static const int VERSION = 105;
+static const int VERSION = 106;
 
 
 
@@ -806,11 +806,10 @@ public:
             vch.insert(it, first, last);
     }
 
+#if !defined(_MSC_VER) || _MSC_VER >= 1300
     void insert(iterator it, const char* first, const char* last)
     {
-        if (last == first) return;
-        assert(last - first > 0);
-        if (it == vch.begin() + nReadPos && (unsigned int)(last - first) <= nReadPos)
+        if (it == vch.begin() + nReadPos && last - first <= nReadPos)
         {
             // special case for inserting at the front when there's room
             nReadPos -= (last - first);
@@ -819,6 +818,7 @@ public:
         else
             vch.insert(it, first, last);
     }
+#endif
 
     iterator erase(iterator it)
     {

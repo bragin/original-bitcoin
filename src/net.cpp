@@ -8,6 +8,7 @@
 void ThreadMessageHandler2(void* parg);
 void ThreadSocketHandler2(void* parg);
 void ThreadOpenConnections2(void* parg);
+bool OpenNetworkConnection(const CAddress& addrConnect);
 
 
 
@@ -22,8 +23,11 @@ uint64 nLocalServices = (fClient ? 0 : NODE_NETWORK);
 CAddress addrLocalHost(0, DEFAULT_PORT, nLocalServices);
 CNode nodeLocalHost(INVALID_SOCKET, CAddress("127.0.0.1", nLocalServices));
 CNode* pnodeLocalHost = &nodeLocalHost;
+uint64 nLocalHostNonce = 0;
 bool fShutdown = false;
-std::array<bool, 10> vfThreadRunning;
+std::array<int, 10> vnThreadsRunning;
+SOCKET hListenSocket = INVALID_SOCKET;
+
 vector<CNode*> vNodes;
 CCriticalSection cs_vNodes;
 map<vector<unsigned char>, CAddress> mapAddresses;
@@ -33,9 +37,11 @@ deque<pair<int64, CInv> > vRelayExpiration;
 CCriticalSection cs_mapRelay;
 map<CInv, int64> mapAlreadyAskedFor;
 
+// Settings
+int fUseProxy = false;
+CAddress addrProxy("127.0.0.1:9050");
 
 
-CAddress addrProxy;
 
 bool ConnectSocket(const CAddress& addrConnect, SOCKET& hSocketRet)
 {
@@ -46,7 +52,7 @@ bool ConnectSocket(const CAddress& addrConnect, SOCKET& hSocketRet)
         return false;
 
     bool fRoutable = !(addrConnect.GetByte(3) == 10 || (addrConnect.GetByte(3) == 192 && addrConnect.GetByte(2) == 168));
-    bool fProxy = (addrProxy.ip && fRoutable);
+    bool fProxy = (fUseProxy && fRoutable);
     struct sockaddr_in sockaddr = (fProxy ? addrProxy.GetSockAddr() : addrConnect.GetSockAddr());
 
     if (connect(hSocket, (struct sockaddr*)&sockaddr, sizeof(sockaddr)) == SOCKET_ERROR)
@@ -57,7 +63,7 @@ bool ConnectSocket(const CAddress& addrConnect, SOCKET& hSocketRet)
 
     if (fProxy)
     {
-        printf("Proxy connecting to %s\n", addrConnect.ToString().c_str());
+        printf("Proxy connecting %s\n", addrConnect.ToStringLog().c_str());
         char pszSocks4IP[] = "\4\1\0\0\0\0\0\0user";
         memcpy(pszSocks4IP + 2, &addrConnect.port, 2);
         memcpy(pszSocks4IP + 4, &addrConnect.ip, 4);
@@ -68,20 +74,20 @@ bool ConnectSocket(const CAddress& addrConnect, SOCKET& hSocketRet)
         if (ret != nSize)
         {
             closesocket(hSocket);
-            return error("Error sending to proxy\n");
+            return error("Error sending to proxy");
         }
         char pchRet[8];
         if (recv(hSocket, pchRet, 8, 0) != 8)
         {
             closesocket(hSocket);
-            return error("Error reading proxy response\n");
+            return error("Error reading proxy response");
         }
         if (pchRet[1] != 0x5a)
         {
             closesocket(hSocket);
-            return error("Proxy returned error %d\n", pchRet[1]);
+            return error("Proxy returned error %d", pchRet[1]);
         }
-        printf("Proxy connection established %s\n", addrConnect.ToString().c_str());
+        printf("Proxy connection established %s\n", addrConnect.ToStringLog().c_str());
     }
 
     hSocketRet = hSocket;
@@ -94,7 +100,7 @@ bool GetMyExternalIP2(const CAddress& addrConnect, const char* pszGet, const cha
 {
     SOCKET hSocket;
     if (!ConnectSocket(addrConnect, hSocket))
-        return error("GetMyExternalIP() : connection to %s failed\n", addrConnect.ToString().c_str());
+        return error("GetMyExternalIP() : connection to %s failed", addrConnect.ToString().c_str());
 
     send(hSocket, pszGet, strlen(pszGet), 0);
 
@@ -130,7 +136,7 @@ bool GetMyExternalIP2(const CAddress& addrConnect, const char* pszGet, const cha
         }
     }
     closesocket(hSocket);
-    return error("GetMyExternalIP() : connection closed\n");
+    return error("GetMyExternalIP() : connection closed");
 }
 
 
@@ -139,6 +145,9 @@ bool GetMyExternalIP(unsigned int& ipRet)
     CAddress addrConnect;
     char* pszGet = NULL;
     char* pszKeyword = NULL;
+
+    if (fUseProxy)
+        return false;
 
     for (int nLookup = 0; nLookup <= 1; nLookup++)
     for (int nHost = 1; nHost <= 2; nHost++)
@@ -218,6 +227,13 @@ bool AddAddress(CAddrDB& addrdb, const CAddress& addr)
                 addrFound.nServices |= addr.nServices;
                 addrdb.WriteAddress(addrFound);
                 return true;
+            }
+            else if (addrFound.nTime < GetAdjustedTime() - 24 * 60 * 60)
+            {
+                // Periodically update most recently seen time
+                addrFound.nTime = GetAdjustedTime();
+                addrdb.WriteAddress(addrFound);
+                return false;
             }
         }
     }
@@ -373,14 +389,14 @@ CNode* ConnectNode(CAddress addrConnect, int64 nTimeout)
     }
 
     /// debug print
-    printf("trying %s\n", addrConnect.ToString().c_str());
+    printf("trying connection %s\n", addrConnect.ToStringLog().c_str());
 
     // Connect
     SOCKET hSocket;
     if (ConnectSocket(addrConnect, hSocket))
     {
         /// debug print
-        printf("connected %s\n", addrConnect.ToString().c_str());
+        printf("connected %s\n", addrConnect.ToStringLog().c_str());
 
         // Set to nonblocking
         u_long nOne = 1;
@@ -408,14 +424,14 @@ CNode* ConnectNode(CAddress addrConnect, int64 nTimeout)
     }
 }
 
-void CNode::Disconnect()
+void CNode::DoDisconnect()
 {
-    printf("disconnecting node %s\n", addr.ToString().c_str());
+    printf("disconnecting node %s\n", addr.ToStringLog().c_str());
 
     closesocket(hSocket);
 
     // If outbound and never got version message, mark address as failed
-    if (!fInbound && nVersion == 0)
+    if (!fInbound && !fSuccessfullyConnected)
         CRITICAL_BLOCK(cs_mapAddresses)
             mapAddresses[addr.GetKey()].nLastFailed = GetTime();
 
@@ -450,14 +466,20 @@ void ThreadSocketHandler(void* parg)
 
     loop
     {
-        vfThreadRunning[0] = true;
+        vnThreadsRunning[0]++;
         CheckForShutdown(0);
         try
         {
             ThreadSocketHandler2(parg);
+            vnThreadsRunning[0]--;
         }
-        CATCH_PRINT_EXCEPTION("ThreadSocketHandler()")
-        vfThreadRunning[0] = false;
+        catch (std::exception& e) {
+            vnThreadsRunning[0]--;
+            PrintException(&e, "ThreadSocketHandler()");
+        } catch (...) {
+            vnThreadsRunning[0]--;
+            PrintException(NULL, "ThreadSocketHandler()");
+        }
         Sleep(5000);
     }
 }
@@ -465,7 +487,6 @@ void ThreadSocketHandler(void* parg)
 void ThreadSocketHandler2(void* parg)
 {
     printf("ThreadSocketHandler started\n");
-    SOCKET hListenSocket = *(SOCKET*)parg;
     list<CNode*> vNodesDisconnected;
     int nPrevNodeCount = 0;
 
@@ -484,7 +505,7 @@ void ThreadSocketHandler2(void* parg)
                 {
                     // remove from vNodes
                     vNodes.erase(remove(vNodes.begin(), vNodes.end(), pnode), vNodes.end());
-                    pnode->Disconnect();
+                    pnode->DoDisconnect();
 
                     // hold in disconnected pool until all refs are released
                     pnode->nReleaseTime = max(pnode->nReleaseTime, GetTime() + 5 * 60);
@@ -548,9 +569,9 @@ void ThreadSocketHandler2(void* parg)
             }
         }
 
-        vfThreadRunning[0] = false;
+        vnThreadsRunning[0]--;
         int nSelect = select(hSocketMax + 1, &fdsetRecv, &fdsetSend, NULL, &timeout);
-        vfThreadRunning[0] = true;
+        vnThreadsRunning[0]++;
         CheckForShutdown(0);
         if (nSelect == SOCKET_ERROR)
         {
@@ -563,7 +584,6 @@ void ThreadSocketHandler2(void* parg)
             }
             Sleep(timeout.tv_usec/1000);
         }
-        RandAddSeed();
 
         //// debug print
         //foreach(CNode* pnode, vNodes)
@@ -590,7 +610,7 @@ void ThreadSocketHandler2(void* parg)
             }
             else
             {
-                printf("accepted connection from %s\n", addr.ToString().c_str());
+                printf("accepted connection %s\n", addr.ToStringLog().c_str());
                 CNode* pnode = new CNode(hSocket, addr, true);
                 pnode->AddRef();
                 CRITICAL_BLOCK(cs_vNodes)
@@ -697,14 +717,20 @@ void ThreadOpenConnections(void* parg)
 
     loop
     {
-        vfThreadRunning[1] = true;
+        vnThreadsRunning[1]++;
         CheckForShutdown(1);
         try
         {
             ThreadOpenConnections2(parg);
+            vnThreadsRunning[1]--;
         }
-        CATCH_PRINT_EXCEPTION("ThreadOpenConnections()")
-        vfThreadRunning[1] = false;
+        catch (std::exception& e) {
+            vnThreadsRunning[1]--;
+            PrintException(&e, "ThreadOpenConnections()");
+        } catch (...) {
+            vnThreadsRunning[1]--;
+            PrintException(NULL, "ThreadOpenConnections()");
+        }
         Sleep(5000);
     }
 }
@@ -713,6 +739,13 @@ void ThreadOpenConnections2(void* parg)
 {
     printf("ThreadOpenConnections started\n");
 
+    // Connect to one specified address
+    while (mapArgs.count("/connect"))
+    {
+        OpenNetworkConnection(CAddress(mapArgs["/connect"].c_str()));
+        Sleep(10000);
+    }
+
     // Initiate network connections
     int nTry = 0;
     bool fIRCOnly = false;
@@ -720,14 +753,14 @@ void ThreadOpenConnections2(void* parg)
     loop
     {
         // Wait
-        vfThreadRunning[1] = false;
+        vnThreadsRunning[1]--;
         Sleep(500);
         while (vNodes.size() >= nMaxConnections || vNodes.size() >= mapAddresses.size())
         {
             CheckForShutdown(1);
             Sleep(2000);
         }
-        vfThreadRunning[1] = true;
+        vnThreadsRunning[1]++;
         CheckForShutdown(1);
 
 
@@ -815,43 +848,48 @@ void ThreadOpenConnections2(void* parg)
 
         // Once we've chosen an IP, we'll try every given port before moving on
         foreach(const CAddress& addrConnect, (*mi).second)
-        {
-            //
-            // Initiate outbound network connection
-            //
-            CheckForShutdown(1);
-            if (addrConnect.ip == addrLocalHost.ip || !addrConnect.IsIPv4() || FindNode(addrConnect.ip))
-                continue;
-
-            vfThreadRunning[1] = false;
-            CNode* pnode = ConnectNode(addrConnect);
-            vfThreadRunning[1] = true;
-            CheckForShutdown(1);
-            if (!pnode)
-                continue;
-            pnode->fNetworkNode = true;
-
-            if (addrLocalHost.IsRoutable())
-            {
-                // Advertise our address
-                vector<CAddress> vAddrToSend;
-                vAddrToSend.push_back(addrLocalHost);
-                pnode->PushMessage("addr", vAddrToSend);
-            }
-
-            // Get as many addresses as we can
-            pnode->PushMessage("getaddr");
-
-            ////// should the one on the receiving end do this too?
-            // Subscribe our local subscription list
-            const unsigned int nHops = 0;
-            for (unsigned int nChannel = 0; nChannel < pnodeLocalHost->vfSubscribe.size(); nChannel++)
-                if (pnodeLocalHost->vfSubscribe[nChannel])
-                    pnode->PushMessage("subscribe", nChannel, nHops);
-
-            break;
-        }
+            if (OpenNetworkConnection(addrConnect))
+                break;
     }
+}
+
+bool OpenNetworkConnection(const CAddress& addrConnect)
+{
+    //
+    // Initiate outbound network connection
+    //
+    CheckForShutdown(1);
+    if (addrConnect.ip == addrLocalHost.ip || !addrConnect.IsIPv4() || FindNode(addrConnect.ip))
+        return false;
+
+    vnThreadsRunning[1]--;
+    CNode* pnode = ConnectNode(addrConnect);
+    vnThreadsRunning[1]++;
+    CheckForShutdown(1);
+    if (!pnode)
+        return false;
+    pnode->fNetworkNode = true;
+
+    if (addrLocalHost.IsRoutable() && !fUseProxy)
+    {
+        // Advertise our address
+        vector<CAddress> vAddrToSend;
+        vAddrToSend.push_back(addrLocalHost);
+        pnode->PushMessage("addr", vAddrToSend);
+    }
+
+    // Get as many addresses as we can
+    pnode->PushMessage("getaddr");
+    pnode->fGetAddr = true; // don't relay the results of the getaddr
+
+    ////// should the one on the receiving end do this too?
+    // Subscribe our local subscription list
+    const unsigned int nHops = 0;
+    for (unsigned int nChannel = 0; nChannel < pnodeLocalHost->vfSubscribe.size(); nChannel++)
+        if (pnodeLocalHost->vfSubscribe[nChannel])
+            pnode->PushMessage("subscribe", nChannel, nHops);
+
+    return true;
 }
 
 
@@ -867,14 +905,20 @@ void ThreadMessageHandler(void* parg)
 
     loop
     {
-        vfThreadRunning[2] = true;
+        vnThreadsRunning[2]++;
         CheckForShutdown(2);
         try
         {
             ThreadMessageHandler2(parg);
+            vnThreadsRunning[2]--;
         }
-        CATCH_PRINT_EXCEPTION("ThreadMessageHandler()")
-        vfThreadRunning[2] = false;
+        catch (std::exception& e) {
+            vnThreadsRunning[2]--;
+            PrintException(&e, "ThreadMessageHandler()");
+        } catch (...) {
+            vnThreadsRunning[2]--;
+            PrintException(NULL, "ThreadMessageHandler()");
+        }
         Sleep(5000);
     }
 }
@@ -905,35 +949,12 @@ void ThreadMessageHandler2(void* parg)
         }
 
         // Wait and allow messages to bunch up
-        vfThreadRunning[2] = false;
+        vnThreadsRunning[2]--;
         Sleep(100);
-        vfThreadRunning[2] = true;
+        vnThreadsRunning[2]++;
         CheckForShutdown(2);
     }
 }
-
-
-
-
-
-
-
-
-
-//// todo: start one thread per processor, use getenv("NUMBER_OF_PROCESSORS")
-void ThreadBitcoinMiner(void* parg)
-{
-    vfThreadRunning[3] = true;
-    CheckForShutdown(3);
-    try
-    {
-        bool fRet = BitcoinMiner();
-        printf("BitcoinMiner returned %s\n\n\n", fRet ? "true" : "false");
-    }
-    CATCH_PRINT_EXCEPTION("BitcoinMiner()")
-    vfThreadRunning[3] = false;
-}
-
 
 
 
@@ -966,20 +987,20 @@ bool StartNode(string& strError)
         printf("%s\n", strError.c_str());
         return false;
     }
-    struct hostent* pHostEnt = gethostbyname(pszHostName);
-    if (!pHostEnt)
+    struct hostent* phostent = gethostbyname(pszHostName);
+    if (!phostent)
     {
         strError = strprintf("Error: Unable to get IP address of this computer (gethostbyname returned error %d)", WSAGetLastError());
         printf("%s\n", strError.c_str());
         return false;
     }
-    addrLocalHost = CAddress(*(long*)(pHostEnt->h_addr_list[0]),
+    addrLocalHost = CAddress(*(long*)(phostent->h_addr_list[0]),
                              DEFAULT_PORT,
                              nLocalServices);
     printf("addrLocalHost = %s\n", addrLocalHost.ToString().c_str());
 
     // Create socket for listening for incoming connections
-    SOCKET hListenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    hListenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (hListenSocket == INVALID_SOCKET)
     {
         strError = strprintf("Error: Couldn't open socket for incoming connections (socket returned error %d)", WSAGetLastError());
@@ -1021,13 +1042,21 @@ bool StartNode(string& strError)
     }
 
     // Get our external IP address for incoming connections
-    if (addrIncoming.ip)
-        addrLocalHost.ip = addrIncoming.ip;
-
-    if (GetMyExternalIP(addrLocalHost.ip))
+    if (fUseProxy)
     {
-        addrIncoming = addrLocalHost;
-        CWalletDB().WriteSetting("addrIncoming", addrIncoming);
+        // Proxies can't take incoming connections
+        addrLocalHost.ip = CAddress("0.0.0.0").ip;
+    }
+    else
+    {
+        if (addrIncoming.ip)
+            addrLocalHost.ip = addrIncoming.ip;
+
+        if (GetMyExternalIP(addrLocalHost.ip))
+        {
+            addrIncoming = addrLocalHost;
+            CWalletDB().WriteSetting("addrIncoming", addrIncoming);
+        }
     }
 
     // Get addresses from IRC and advertise ours
@@ -1037,7 +1066,7 @@ bool StartNode(string& strError)
     //
     // Start threads
     //
-    if (_beginthread(ThreadSocketHandler, 0, new SOCKET(hListenSocket)) == -1)
+    if (_beginthread(ThreadSocketHandler, 0, NULL) == -1)
     {
         strError = "Error: _beginthread(ThreadSocketHandler) failed";
         printf("%s\n", strError.c_str());
@@ -1067,17 +1096,17 @@ bool StopNode()
     fShutdown = true;
     nTransactionsUpdated++;
     int64 nStart = GetTime();
-    while (vfThreadRunning[0] || vfThreadRunning[2] || vfThreadRunning[3])
+    while (vnThreadsRunning[0] || vnThreadsRunning[2] || vnThreadsRunning[3])
     {
         if (GetTime() - nStart > 15)
             break;
         Sleep(20);
     }
-    if (vfThreadRunning[0]) printf("ThreadSocketHandler still running\n");
-    if (vfThreadRunning[1]) printf("ThreadOpenConnections still running\n");
-    if (vfThreadRunning[2]) printf("ThreadMessageHandler still running\n");
-    if (vfThreadRunning[3]) printf("ThreadBitcoinMiner still running\n");
-    while (vfThreadRunning[2])
+    if (vnThreadsRunning[0]) printf("ThreadSocketHandler still running\n");
+    if (vnThreadsRunning[1]) printf("ThreadOpenConnections still running\n");
+    if (vnThreadsRunning[2]) printf("ThreadMessageHandler still running\n");
+    if (vnThreadsRunning[3]) printf("ThreadBitcoinMiner still running\n");
+    while (vnThreadsRunning[2])
         Sleep(20);
     Sleep(50);
 
@@ -1091,10 +1120,15 @@ void CheckForShutdown(int n)
     if (fShutdown)
     {
         if (n != -1)
-            vfThreadRunning[n] = false;
+            if (--vnThreadsRunning[n] < 0)
+                vnThreadsRunning[n] = 0;
         if (n == 0)
+        {
             foreach(CNode* pnode, vNodes)
                 closesocket(pnode->hSocket);
+            closesocket(hListenSocket);
+        }
+        printf("Thread %d exiting\n", n);
         _endthread();
     }
 }

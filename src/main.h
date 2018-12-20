@@ -41,6 +41,8 @@ extern int nDropMessagesTest;
 extern int fGenerateBitcoins;
 extern int64 nTransactionFee;
 extern CAddress addrIncoming;
+extern int fLimitProcessors;
+extern int nLimitProcessors;
 
 
 
@@ -59,14 +61,17 @@ void ReacceptWalletTransactions();
 void RelayWalletTransactions();
 bool LoadBlockIndex(bool fAllowNew=true);
 void PrintBlockTree();
-bool BitcoinMiner();
 bool ProcessMessages(CNode* pfrom);
 bool ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv);
 bool SendMessages(CNode* pto);
 int64 GetBalance();
-bool CreateTransaction(CScript scriptPubKey, int64 nValue, CWalletTx& txNew, int64& nFeeRequiredRet);
-bool CommitTransactionSpent(const CWalletTx& wtxNew);
+bool CreateTransaction(CScript scriptPubKey, int64 nValue, CWalletTx& wtxNew, CKey& keyRet, int64& nFeeRequiredRet);
+bool CommitTransactionSpent(const CWalletTx& wtxNew, const CKey& key);
 bool SendMoney(CScript scriptPubKey, int64 nValue, CWalletTx& wtxNew);
+void GenerateBitcoins(bool fGenerate);
+void ThreadBitcoinMiner(void* parg);
+bool BitcoinMiner();
+
 
 
 
@@ -361,7 +366,7 @@ public:
     int nVersion;
     vector<CTxIn> vin;
     vector<CTxOut> vout;
-    int nLockTime;
+    unsigned int nLockTime;
 
 
     CTransaction()
@@ -396,9 +401,15 @@ public:
         return SerializeHash(*this);
     }
 
-    bool IsFinal() const
+    bool IsFinal(int64 nBlockTime=0) const
     {
-        if (nLockTime == 0 || nLockTime < nBestHeight)
+        // Time based nLockTime implemented in 0.1.6,
+        // do not use time based until most 0.1.5 nodes have upgraded.
+        if (nBlockTime == 0)
+            nBlockTime = GetAdjustedTime();
+        if (nLockTime == 0)
+            return true;
+        if (nLockTime < (nLockTime < 500000000 ? nBestHeight : nBlockTime))
             return true;
         foreach(const CTxIn& txin, vin)
             if (!txin.IsFinal())
@@ -681,8 +692,9 @@ public:
     char fSpent;
     //// probably need to sign the order info so know it came from payer
 
-    // memory only
+    // memory only UI hints
     mutable unsigned int nTimeDisplayed;
+    mutable int nLinesDisplayed;
 
 
     CWalletTx()
@@ -707,6 +719,7 @@ public:
         fFromMe = false;
         fSpent = false;
         nTimeDisplayed = 0;
+        nLinesDisplayed = 0;
     }
 
     IMPLEMENT_SERIALIZE
@@ -1321,7 +1334,7 @@ public:
 
 extern map<uint256, CTransaction> mapTransactions;
 extern map<uint256, CWalletTx> mapWallet;
-extern vector<pair<uint256, bool> > vWalletUpdated;
+extern vector<uint256> vWalletUpdated;
 extern CCriticalSection cs_mapWallet;
 extern map<vector<unsigned char>, CPrivKey> mapKeys;
 extern map<uint160, vector<unsigned char> > mapPubKeys;

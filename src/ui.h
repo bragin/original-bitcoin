@@ -21,6 +21,16 @@ enum
 
 
 
+
+extern map<string, string> mapArgs;
+
+// Settings
+extern int fShowGenerated;
+extern int fMinimizeToTray;
+extern int fMinimizeOnClose;
+
+
+
 extern void HandleCtrlA(wxKeyEvent& event);
 extern string DateTimeStr(int64 nTime);
 extern string FormatTxStatus(const CWalletTx& wtx);
@@ -38,13 +48,17 @@ class CMainFrame : public CMainFrameBase
 protected:
     // Event handlers
     void OnClose(wxCloseEvent& event);
+    void OnIconize(wxIconizeEvent& event);
     void OnMouseEvents(wxMouseEvent& event);
     void OnKeyDown(wxKeyEvent& event) { HandleCtrlA(event); }
     void OnIdle(wxIdleEvent& event);
     void OnPaint(wxPaintEvent& event);
     void OnPaintListCtrl(wxPaintEvent& event);
     void OnMenuFileExit(wxCommandEvent& event);
+    void OnMenuViewShowGenerated(wxCommandEvent& event);
+    void OnUpdateUIViewShowGenerated(wxUpdateUIEvent& event);
     void OnMenuOptionsGenerate(wxCommandEvent& event);
+    void OnUpdateUIOptionsGenerate(wxUpdateUIEvent& event);
     void OnMenuOptionsChangeYourAddress(wxCommandEvent& event);
     void OnMenuOptionsOptions(wxCommandEvent& event);
     void OnMenuHelpAbout(wxCommandEvent& event);
@@ -74,7 +88,8 @@ public:
 
     void OnCrossThreadCall(wxCommandEvent& event);
     void InsertLine(bool fNew, int nIndex, uint256 hashKey, string strSort, const wxString& str1, const wxString& str2, const wxString& str3, const wxString& str4, const wxString& str5);
-    void InsertTransaction(const CWalletTx& wtx, bool fNew, int nIndex=-1);
+    bool DeleteLine(uint256 hashKey);
+    bool InsertTransaction(const CWalletTx& wtx, bool fNew, int nIndex=-1);
     void RefreshListCtrl();
     void RefreshStatus();
 };
@@ -102,13 +117,26 @@ class COptionsDialog : public COptionsDialogBase
 {
 protected:
     // Event handlers
+    void OnListBox(wxCommandEvent& event);
     void OnKillFocusTransactionFee(wxFocusEvent& event);
+    void OnCheckBoxLimitProcessors(wxCommandEvent& event);
+    void OnCheckBoxMinimizeToTray(wxCommandEvent& event);
+    void OnCheckBoxUseProxy(wxCommandEvent& event);
+    void OnKillFocusProxy(wxFocusEvent& event);
+
     void OnButtonOK(wxCommandEvent& event);
     void OnButtonCancel(wxCommandEvent& event);
+    void OnButtonApply(wxCommandEvent& event);
 
 public:
     /** Constructor */
     COptionsDialog(wxWindow* parent);
+
+    // Custom
+    bool fTmpStartOnSystemStartup;
+    bool fTmpMinimizeOnClose;
+    void SelectPage(int nPage);
+    CAddress GetProxyAddr();
 };
 
 
@@ -141,6 +169,11 @@ protected:
 public:
     /** Constructor */
     CSendDialog(wxWindow* parent, const wxString& strAddress="");
+
+    // Custom
+    bool fEnabledPrev;
+    string strFromSave;
+    string strMessageSave;
 };
 
 
@@ -164,7 +197,7 @@ public:
     int64 nPrice;
     CWalletTx wtx;
     wxDateTime start;
-    string strStatus;
+    char pszStatus[10000];
     bool fCanCancel;
     bool fAbort;
     bool fSuccess;
@@ -413,6 +446,34 @@ public:
     string GetValue1() { return (string)m_textCtrl1->GetValue(); }
     string GetValue2() { return (string)m_textCtrl2->GetValue(); }
 };
+
+
+
+class CMyTaskBarIcon : public wxTaskBarIcon
+{
+protected:
+    // Event handlers
+    void OnLeftButtonDClick(wxTaskBarIconEvent& event);
+    void OnMenuRestore(wxCommandEvent& event);
+    void OnUpdateUIGenerate(wxUpdateUIEvent& event);
+    void OnMenuGenerate(wxCommandEvent& event);
+    void OnMenuExit(wxCommandEvent& event);
+
+public:
+    CMyTaskBarIcon() : wxTaskBarIcon()
+    {
+        Show(true);
+    }
+
+    void Show(bool fShow=true);
+    void Hide();
+    void Restore();
+    void UpdateTooltip();
+    virtual wxMenu* CreatePopupMenu();
+
+DECLARE_EVENT_TABLE()
+};
+
 
 
 
