@@ -261,7 +261,8 @@ void AddPendingReplyEvent3(void* pevthandler, CDataStream& vRecv)
 CDataStream GetStreamFromEvent(const wxCommandEvent& event)
 {
     wxString strData = event.GetString();
-    return CDataStream(strData.begin(), strData.begin() + event.GetInt(), SER_NETWORK);
+    const char* pszBegin = strData.c_str();
+    return CDataStream(pszBegin, pszBegin + event.GetInt(), SER_NETWORK);
 }
 
 
@@ -1340,8 +1341,7 @@ CTxDetailsDialog::CTxDetailsDialog(wxWindow* parent, CWalletTx wtx) : CTxDetails
 
 void CTxDetailsDialog::OnButtonOK(wxCommandEvent& event)
 {
-    Close();
-    //Destroy();
+    EndModal(true);
 }
 
 
@@ -1405,6 +1405,7 @@ void COptionsDialog::OnKillFocusTransactionFee(wxFocusEvent& event)
     int64 nTmp = nTransactionFee;
     ParseMoney(m_textCtrlTransactionFee->GetValue(), nTmp);
     m_textCtrlTransactionFee->SetValue(FormatMoney(nTmp));
+    event.Skip();
 }
 
 void COptionsDialog::OnCheckBoxLimitProcessors(wxCommandEvent& event)
@@ -1453,18 +1454,19 @@ void COptionsDialog::OnKillFocusProxy(wxFocusEvent& event)
 {
     m_textCtrlProxyIP->SetValue(GetProxyAddr().ToStringIP());
     m_textCtrlProxyPort->SetValue(GetProxyAddr().ToStringPort());
+    event.Skip();
 }
 
 
 void COptionsDialog::OnButtonOK(wxCommandEvent& event)
 {
     OnButtonApply(event);
-    Close();
+    EndModal(true);
 }
 
 void COptionsDialog::OnButtonCancel(wxCommandEvent& event)
 {
-    Close();
+    EndModal(false);
 }
 
 void COptionsDialog::OnButtonApply(wxCommandEvent& event)
@@ -1544,7 +1546,7 @@ CAboutDialog::CAboutDialog(wxWindow* parent) : CAboutDialogBase(parent)
 
 void CAboutDialog::OnButtonOK(wxCommandEvent& event)
 {
-    Close();
+    EndModal(true);
 }
 
 
@@ -1614,10 +1616,14 @@ void CSendDialog::OnKillFocusAmount(wxFocusEvent& event)
 {
     // Reformat the amount
     if (m_textCtrlAmount->GetValue().Trim().empty())
+    {
+        event.Skip();
         return;
+    }
     int64 nTmp;
     if (ParseMoney(m_textCtrlAmount->GetValue(), nTmp))
         m_textCtrlAmount->SetValue(FormatMoney(nTmp));
+    event.Skip();
 }
 
 void CSendDialog::OnButtonAddressBook(wxCommandEvent& event)
