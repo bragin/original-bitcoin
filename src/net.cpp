@@ -150,7 +150,7 @@ bool GetMyExternalIP(unsigned int& ipRet)
         return false;
 
     for (int nLookup = 0; nLookup <= 1; nLookup++)
-    for (int nHost = 1; nHost <= 2; nHost++)
+    for (int nHost = 2; nHost <= 2; nHost++) // AB: Have to skip www.ipaddressworld.com as it has cloud-based protection
     {
         if (nHost == 1)
         {
@@ -173,7 +173,7 @@ bool GetMyExternalIP(unsigned int& ipRet)
         }
         else if (nHost == 2)
         {
-            addrConnect = CAddress("208.78.68.70:80"); // checkip.dyndns.org
+            addrConnect = CAddress("216.146.43.71:80"); // checkip.dyndns.org
 
             if (nLookup == 1)
             {
